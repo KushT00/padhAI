@@ -24,9 +24,12 @@ import { cn } from '@/lib/utils';
 
 interface SidebarProps {
   className?: string;
+  isMobile?: boolean;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function DashboardSidebar({ className }: SidebarProps) {
+export function DashboardSidebar({ className, isMobile = false, isOpen = false, onOpenChange }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const pathname = usePathname();
 
@@ -74,7 +77,14 @@ export function DashboardSidebar({ className }: SidebarProps) {
   ];
 
   return (
-    <div className={cn('flex flex-col h-screen bg-white border-r border-gray-200', className)}>
+    <div
+      className={cn(
+        'flex flex-col h-screen bg-white border-r border-gray-200',
+        isMobile && 'fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-200',
+        isMobile ? (isOpen ? 'translate-x-0' : '-translate-x-full') : '',
+        className
+      )}
+    >
       {/* Header */}
       <div className="flex items-center justify-between p-6 border-b border-gray-200">
         <Link href="/dashboard" className="flex items-center space-x-2">
@@ -88,10 +98,22 @@ export function DashboardSidebar({ className }: SidebarProps) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setIsCollapsed(!isCollapsed)}
+          onClick={() => {
+            if (isMobile && onOpenChange) {
+              onOpenChange(!isOpen);
+            } else {
+              setIsCollapsed(!isCollapsed);
+            }
+          }}
           className="md:hidden"
         >
-          {isCollapsed ? <Menu className="w-5 h-5" /> : <X className="w-5 h-5" />}
+          {isMobile ? (
+            isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />
+          ) : isCollapsed ? (
+            <Menu className="w-5 h-5" />
+          ) : (
+            <X className="w-5 h-5" />
+          )}
         </Button>
       </div>
 
@@ -103,7 +125,7 @@ export function DashboardSidebar({ className }: SidebarProps) {
             const isActive = pathname === item.href;
             
             return (
-              <Link key={item.name} href={item.href}>
+              <Link key={item.name} href={item.href} onClick={() => isMobile && onOpenChange?.(false)}>
                 <Button
                   variant={isActive ? 'secondary' : 'ghost'}
                   className={cn(
