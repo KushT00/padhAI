@@ -92,7 +92,7 @@ export function DashboardSidebar({ className, isMobile = false, isOpen = false, 
             <BookOpen className="w-5 h-5 text-white" />
           </div>
           {!isCollapsed && (
-            <span className="text-xl font-bold text-gray-900">ExamAI</span>
+            <span className="text-xl font-bold text-gray-900">PadhAI</span>
           )}
         </Link>
         <Button
