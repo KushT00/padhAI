@@ -65,13 +65,13 @@ export default function TestTokenPage() {
             <h3 className="font-semibold text-blue-900 mb-2">Quick Test Commands</h3>
             <div className="space-y-2 text-sm">
               <p className="font-mono bg-white p-2 rounded">
-                POST http://localhost:8000/index_folder
+                POST {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/index_folder
               </p>
               <p className="font-mono bg-white p-2 rounded">
-                POST http://localhost:8000/chat
+                POST {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/chat
               </p>
               <p className="font-mono bg-white p-2 rounded">
-                GET http://localhost:8000/folders
+                GET {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/folders
               </p>
             </div>
           </div>
