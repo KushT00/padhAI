@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   Send, 
   Paperclip, 
@@ -13,36 +14,42 @@ import {
   Bot,
   User,
   FileText,
-  BookOpen
+  BookOpen,
+  Loader2,
+  AlertCircle,
+  FolderOpen
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { chatWithFolder, getUserFolders } from '@/lib/api';
+import { supabase } from '@/lib/client';
+import { useRouter } from 'next/navigation';
 
 interface Message {
   id: string;
   content: string;
   sender: 'user' | 'ai';
   timestamp: Date;
-  context?: string[];
+  folder?: string;
 }
 
 export default function ChatPage() {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      content: 'Hello! I\'m your AI tutor. I can help you understand concepts from your uploaded notes, answer questions, and explain complex topics. What would you like to learn about today?',
+      content: 'Hello! I\'m your AI tutor. Select a folder from the dropdown above to start chatting with your documents. I can help you understand concepts, answer questions, and explain complex topics.',
       sender: 'ai',
       timestamp: new Date(Date.now() - 300000)
     }
   ]);
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<string>('');
+  const [folders, setFolders] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const contextFiles = [
-    'Physics Notes - Chapter 5.pdf',
-    '2023 Chemistry Past Paper.pdf'
-  ];
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,42 +59,85 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    checkUserAndLoadFolders();
+  }, []);
+
+  const checkUserAndLoadFolders = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/auth/login');
+      return;
+    }
+
+    await loadFolders();
+  };
+
+  const loadFolders = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const result = await getUserFolders();
+      setFolders(result.folders);
+      
+      if (result.folders.length > 0) {
+        setSelectedFolder(result.folders[0]);
+      }
+    } catch (err: any) {
+      console.error('Error loading folders:', err);
+      setError(err.message || 'Failed to load folders');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (!inputMessage.trim()) return;
+    if (!inputMessage.trim() || !selectedFolder) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       content: inputMessage,
       sender: 'user',
-      timestamp: new Date()
+      timestamp: new Date(),
+      folder: selectedFolder
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentQuery = inputMessage;
     setInputMessage('');
     setIsTyping(true);
+    setError(null);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      // Call backend API
+      const response = await chatWithFolder(selectedFolder, currentQuery);
+      
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: generateAIResponse(inputMessage),
+        content: response.answer,
         sender: 'ai',
         timestamp: new Date(),
-        context: contextFiles
+        folder: selectedFolder
       };
+      
       setMessages(prev => [...prev, aiMessage]);
+    } catch (err: any) {
+      console.error('Error getting AI response:', err);
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: `Sorry, I encountered an error: ${err.message}. ${err.message.includes('not indexed') ? 'Please make sure to index this folder first from the Folders page.' : 'Please try again.'}`,
+        sender: 'ai',
+        timestamp: new Date(),
+        folder: selectedFolder
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+      setError(err.message);
+    } finally {
       setIsTyping(false);
-    }, 1500);
-  };
-
-  const generateAIResponse = (userInput: string): string => {
-    const responses = [
-      "Based on your Physics notes from Chapter 5, I can help explain this concept. Thermodynamics deals with the relationships between heat, work, temperature, and energy. The first law states that energy cannot be created or destroyed, only transformed from one form to another.",
-      "Looking at your Chemistry past paper, this is a common question type. Let me break down the solution step by step. First, we need to identify the reaction type, then balance the equation, and finally calculate the stoichiometry.",
-      "This is an interesting question! From your uploaded materials, I can see similar problems have been covered. Let me provide a detailed explanation with examples to help you understand the underlying principles.",
-      "Great question! This topic appears frequently in exams based on the patterns I've analyzed from your past papers. Here's a comprehensive explanation that will help you tackle similar questions."
-    ];
-    return responses[Math.floor(Math.random() * responses.length)];
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -108,31 +158,63 @@ export default function ChatPage() {
             </div>
             <div>
               <h1 className="text-lg font-semibold text-gray-900">AI Tutor</h1>
-              <p className="text-sm text-gray-500">Always ready to help</p>
+              <p className="text-sm text-gray-500">Chat with your documents</p>
             </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <Badge variant="secondary" className="text-xs">
-              <FileText className="w-3 h-3 mr-1" />
-              {contextFiles.length} files active
-            </Badge>
+          <div className="flex items-center space-x-3">
+            {folders.length > 0 && (
+              <Select value={selectedFolder} onValueChange={setSelectedFolder}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Select folder" />
+                </SelectTrigger>
+                <SelectContent>
+                  {folders.map((folder) => (
+                    <SelectItem key={folder} value={folder}>
+                      <div className="flex items-center space-x-2">
+                        <FolderOpen className="w-4 h-4" />
+                        <span>{folder}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {selectedFolder && (
+              <Badge variant="secondary" className="text-xs">
+                <FileText className="w-3 h-3 mr-1" />
+                {selectedFolder}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Context Files */}
-      {contextFiles.length > 0 && (
+      {/* Error Alert */}
+      {error && (
+        <div className="bg-red-50 border-b border-red-200 p-3">
+          <div className="flex items-center space-x-2 text-sm text-red-700">
+            <AlertCircle className="w-4 h-4" />
+            <span>{error}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {loading && (
         <div className="bg-blue-50 border-b border-blue-200 p-3">
           <div className="flex items-center space-x-2 text-sm text-blue-700">
-            <BookOpen className="w-4 h-4" />
-            <span className="font-medium">Using context from:</span>
-            <div className="flex flex-wrap gap-2">
-              {contextFiles.map((file, index) => (
-                <Badge key={index} variant="outline" className="text-xs bg-white border-blue-200">
-                  {file}
-                </Badge>
-              ))}
-            </div>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Loading folders...</span>
+          </div>
+        </div>
+      )}
+
+      {/* No Folders Warning */}
+      {!loading && folders.length === 0 && (
+        <div className="bg-yellow-50 border-b border-yellow-200 p-3">
+          <div className="flex items-center space-x-2 text-sm text-yellow-700">
+            <AlertCircle className="w-4 h-4" />
+            <span>No folders found. Please create a folder and upload documents first.</span>
           </div>
         </div>
       )}
@@ -179,16 +261,12 @@ export default function ChatPage() {
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">
                       {message.content}
                     </p>
-                    {message.context && (
+                    {message.folder && message.sender === 'ai' && (
                       <div className="mt-3 pt-3 border-t border-gray-100">
-                        <p className="text-xs text-gray-500 mb-2">Referenced:</p>
-                        <div className="flex flex-wrap gap-1">
-                          {message.context.map((file, index) => (
-                            <Badge key={index} variant="outline" className="text-xs">
-                              {file}
-                            </Badge>
-                          ))}
-                        </div>
+                        <p className="text-xs text-gray-500">
+                          <FolderOpen className="w-3 h-3 inline mr-1" />
+                          Source: {message.folder}
+                        </p>
                       </div>
                     )}
                   </Card>
@@ -234,29 +312,34 @@ export default function ChatPage() {
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask me anything about your study materials..."
+                placeholder={
+                  selectedFolder 
+                    ? `Ask about ${selectedFolder}...` 
+                    : "Select a folder to start chatting..."
+                }
                 className="pr-12 py-3 resize-none border-gray-200 focus:border-blue-400 focus:ring-blue-400"
-                disabled={isTyping}
+                disabled={isTyping || !selectedFolder}
               />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <Paperclip className="w-4 h-4" />
-              </Button>
             </div>
             <Button
               onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || isTyping}
+              disabled={!inputMessage.trim() || isTyping || !selectedFolder}
               className="bg-blue-400 hover:bg-blue-500 px-4 py-3"
             >
-              <Send className="w-4 h-4" />
+              {isTyping ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
             </Button>
           </div>
           <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-            <span>Press Enter to send, Shift + Enter for new line</span>
-            <span>Powered by AI • Responses may not be perfect</span>
+            <span>
+              {selectedFolder 
+                ? "Press Enter to send, Shift + Enter for new line" 
+                : "Select a folder from the dropdown above to start"}
+            </span>
+            <span>Powered by Groq & Gemini AI</span>
           </div>
         </div>
       </div>

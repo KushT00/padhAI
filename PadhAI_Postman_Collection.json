@@ -1,0 +1,107 @@
+{
+  "info": {
+    "name": "PadhAI RAG API",
+    "description": "API endpoints for PadhAI multi-tenant RAG system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": [""]
+        }
+      }
+    },
+    {
+      "name": "Get User Folders",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer YOUR_JWT_TOKEN_HERE",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/folders",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["folders"]
+        }
+      }
+    },
+    {
+      "name": "Index Folder",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer YOUR_JWT_TOKEN_HERE",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"folder_name\": \"ML\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8000/index_folder",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["index_folder"]
+        }
+      }
+    },
+    {
+      "name": "Chat with Folder",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer YOUR_JWT_TOKEN_HERE",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"folder_name\": \"ML\",\n  \"query\": \"What is gradient descent?\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8000/chat",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["chat"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    }
+  ]
+}

@@ -26,6 +26,7 @@ import {
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/client';
 import { useRouter } from 'next/navigation';
+import { indexFolder } from '@/lib/api';
 
 interface Folder {
   name: string;
@@ -58,6 +59,8 @@ export default function FoldersPage() {
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [indexing, setIndexing] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     checkUser();
@@ -165,15 +168,13 @@ export default function FoldersPage() {
   };
 
   const uploadFile = async () => {
-    if (!userId || !selectedFile) return;
+    if (!userId || !selectedFile || !currentFolder) return;
     
     setUploading(true);
     setError(null);
     
     try {
-      const filePath = currentFolder 
-        ? `${userId}/${currentFolder}/${selectedFile.name}`
-        : `${userId}/${selectedFile.name}`;
+      const filePath = `${userId}/${currentFolder}/${selectedFile.name}`;
       
       const { error: uploadError } = await supabase.storage
         .from('folders')
@@ -187,11 +188,36 @@ export default function FoldersPage() {
       setSelectedFile(null);
       setIsUploadFileOpen(false);
       await loadFoldersAndFiles();
+      
+      // Show success message and prompt to index
+      setSuccessMessage(`File uploaded successfully! Click "Index Folder" to make it searchable.`);
+      setTimeout(() => setSuccessMessage(null), 5000);
+      
     } catch (err: any) {
       console.error('Error uploading file:', err);
       setError(err.message || 'Failed to upload file');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleIndexFolder = async () => {
+    if (!currentFolder) return;
+    
+    setIndexing(true);
+    setError(null);
+    
+    try {
+      const result = await indexFolder(currentFolder);
+      setSuccessMessage(
+        `Folder indexed successfully! Processed ${result.files_processed} files and created ${result.chunks_created} chunks.`
+      );
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } catch (err: any) {
+      console.error('Error indexing folder:', err);
+      setError(err.message || 'Failed to index folder');
+    } finally {
+      setIndexing(false);
     }
   };
 
@@ -299,6 +325,25 @@ export default function FoldersPage() {
         </div>
       )}
 
+      {/* Success Alert */}
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start space-x-3">
+          <AlertCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h3 className="text-sm font-medium text-green-800">Success</h3>
+            <p className="text-sm text-green-700 mt-1">{successMessage}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSuccessMessage(null)}
+            className="text-green-600 hover:text-green-800"
+          >
+            ×
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -382,13 +427,31 @@ export default function FoldersPage() {
             </Dialog>
           )}
           {currentFolder && (
-            <Dialog open={isUploadFileOpen} onOpenChange={setIsUploadFileOpen}>
-              <DialogTrigger asChild>
-                <Button className="bg-blue-400 hover:bg-blue-500">
-                  <Upload className="w-4 h-4 mr-2" />
-                  Upload File
-                </Button>
-              </DialogTrigger>
+            <>
+              <Button
+                onClick={handleIndexFolder}
+                disabled={indexing}
+                className="bg-green-500 hover:bg-green-600"
+              >
+                {indexing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Indexing...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4 mr-2" />
+                    Index Folder
+                  </>
+                )}
+              </Button>
+              <Dialog open={isUploadFileOpen} onOpenChange={setIsUploadFileOpen}>
+                <DialogTrigger asChild>
+                  <Button className="bg-blue-400 hover:bg-blue-500">
+                    <Upload className="w-4 h-4 mr-2" />
+                    Upload File
+                  </Button>
+                </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Upload File to {currentFolder}</DialogTitle>
@@ -437,6 +500,7 @@ export default function FoldersPage() {
                 </div>
               </DialogContent>
             </Dialog>
+            </>
           )}
         </div>
       </div>
