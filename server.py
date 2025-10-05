@@ -31,7 +31,11 @@ app = FastAPI()
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Your Next.js frontend
+    allow_origins=[
+        "http://localhost:3000",  # Local development
+        "https://padh-ai-pro.vercel.app",  # Production
+        "https://*.vercel.app"  # All Vercel preview deployments
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
