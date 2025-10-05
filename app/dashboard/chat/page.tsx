@@ -23,6 +23,10 @@ import { cn } from '@/lib/utils';
 import { chatWithFolder, getUserFolders } from '@/lib/api';
 import { supabase } from '@/lib/client';
 import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github-dark.css';
 
 interface Message {
   id: string;
@@ -258,9 +262,44 @@ export default function ChatPage() {
                       ? 'bg-blue-400 text-white border-blue-400'
                       : 'bg-white border-gray-200'
                   )}>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {message.content}
-                    </p>
+                    {message.sender === 'user' ? (
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap text-white">
+                        {message.content}
+                      </p>
+                    ) : (
+                      <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-p:leading-relaxed prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-blue-600 prose-code:bg-blue-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          rehypePlugins={[rehypeHighlight]}
+                          components={{
+                            code: ({node, inline, className, children, ...props}: any) => {
+                              const match = /language-(\w+)/.exec(className || '');
+                              return !inline ? (
+                                <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 overflow-x-auto">
+                                  <code className={className} {...props}>
+                                    {children}
+                                  </code>
+                                </pre>
+                              ) : (
+                                <code className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+                                  {children}
+                                </code>
+                              );
+                            },
+                            p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
+                            ul: ({children}) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                            ol: ({children}) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                            strong: ({children}) => <strong className="font-bold text-gray-900">{children}</strong>,
+                            em: ({children}) => <em className="italic">{children}</em>,
+                            h1: ({children}) => <h1 className="text-xl font-bold mb-2 mt-4">{children}</h1>,
+                            h2: ({children}) => <h2 className="text-lg font-bold mb-2 mt-3">{children}</h2>,
+                            h3: ({children}) => <h3 className="text-base font-bold mb-1 mt-2">{children}</h3>,
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                    )}
                     {message.folder && message.sender === 'ai' && (
                       <div className="mt-3 pt-3 border-t border-gray-100">
                         <p className="text-xs text-gray-500">
