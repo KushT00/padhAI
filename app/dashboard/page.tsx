@@ -15,6 +15,10 @@ import {
   CheckCircle
 } from 'lucide-react';
 import Link from 'next/link';
+import type { User } from '@supabase/supabase-js';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/client';
+
 
 export default function DashboardPage() {
   const recentActivity = [
@@ -74,12 +78,21 @@ export default function DashboardPage() {
       color: 'text-orange-600'
     }
   ];
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    // Get initial user
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+      
+    });
+  }, []);
 
   return (
     <div className="p-6 space-y-8">
       {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold text-gray-900">Welcome back, John!</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Welcome back, {user?.user_metadata?.full_name || 'Student'}</h1>
         <p className="text-gray-600">Ready to continue your learning journey? Let's make today productive.</p>
       </div>
 

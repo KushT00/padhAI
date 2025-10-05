@@ -11,6 +11,7 @@ import { BookOpen, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
+import { supabase } from '@/lib/client';
 export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -19,12 +20,40 @@ export default function SignupPage() {
     password: '',
     agreeToTerms: false
   });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const router = useRouter();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate signup - in real app, this would call an API
-    router.push('/dashboard');
+    setLoading(true);
+    setError(null);
+    setMessage(null);
+    const { name, email, password } = formData;
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { full_name: name },
+          emailRedirectTo: typeof window !== 'undefined' ? `${location.origin}/dashboard` : undefined,
+        },
+      });
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      if (data.session) {
+        router.push('/dashboard');
+        return;
+      }
+      setMessage('Check your email to confirm your account.');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to sign up');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -58,7 +87,27 @@ export default function SignupPage() {
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Google Signup */}
-            <Button variant="outline" className="w-full py-6 text-gray-700 border-gray-200 hover:bg-gray-50">
+            <Button
+              type="button"
+              onClick={async () => {
+                setLoading(true);
+                setError(null);
+                setMessage(null);
+                try {
+                  await supabase.auth.signInWithOAuth({
+                    provider: 'google',
+                    options: { redirectTo: `${location.origin}/dashboard` }
+                  });
+                } catch (err: any) {
+                  setError(err?.message || 'Failed to start Google sign-in');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              variant="outline"
+              className="w-full py-6 text-gray-700 border-gray-200 hover:bg-gray-50"
+              disabled={loading}
+            >
               <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24">
                 <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                 <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -77,6 +126,16 @@ export default function SignupPage() {
 
             {/* Email/Password Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
+              {error && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded p-2">
+                  {error}
+                </p>
+              )}
+              {message && (
+                <p className="text-sm text-green-700 bg-green-50 border border-green-100 rounded p-2">
+                  {message}
+                </p>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="name" className="text-sm font-medium text-gray-700">
                   Full Name
@@ -167,7 +226,7 @@ export default function SignupPage() {
 
               <Button 
                 type="submit" 
-                disabled={!formData.agreeToTerms}
+                disabled={!formData.agreeToTerms || loading}
                 className="w-full py-6 bg-blue-400 hover:bg-blue-500 text-white font-medium disabled:opacity-50"
               >
                 Create Account
