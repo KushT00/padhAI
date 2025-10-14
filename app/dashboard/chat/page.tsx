@@ -270,7 +270,7 @@ export default function ChatPage() {
                       <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-p:leading-relaxed prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-blue-600 prose-code:bg-blue-50 prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeHighlight]}
+                          rehypePlugins={[rehypeHighlight as any]}
                           components={{
                             code: ({node, inline, className, children, ...props}: any) => {
                               const match = /language-(\w+)/.exec(className || '');
