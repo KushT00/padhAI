@@ -48,6 +48,7 @@ export default function InterviewPrepPage() {
       'Walk me through a project on your resume you are most proud of.',
       'How do you handle tight deadlines and conflicting priorities?',
       'Why are you interested in this role and company?',
+      'Kush',
     ];
     // Crude tailoring based on description keywords
     if (roleDescription.toLowerCase().includes('frontend')) {

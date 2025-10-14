@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Box Animation</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    margin-top: 80px;
+    background: #fafafa;
+  }
+  #box {
+    width: 60px;
+    height: 60px;
+    background: red;
+    position: absolute;
+    left: 0;
+    top: 150px;
+    border-radius: 10px;
+  }
+  button {
+    padding: 10px 20px;
+    font-size: 16px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Box Animation</h1>
+<button id="playBtn">Play</button>
+<div id="box"></div>
+
+<script>
+  const box = document.getElementById('box');
+  const playBtn = document.getElementById('playBtn');
+  let animationRunning = false;
+
+  playBtn.addEventListener('click', () => {
+    if (animationRunning) return; // ignore if running
+    animationRunning = true;
+
+    const screenWidth = window.innerWidth - box.offsetWidth;
+    let pos = 0;
+    const speed = 3; // pixels per frame
+
+    function moveBox() {
+      if (pos < screenWidth) {
+        pos += speed;
+        box.style.left = pos + 'px';
+        requestAnimationFrame(moveBox);
+      } else {
+        animationRunning = false;
+      }
+    }
+
+    moveBox();
+  });
+</script>
+
+</body>
+</html>
