@@ -210,7 +210,7 @@ export default function InterviewPrepPage() {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="w-2/3 flex items-center justify-center p-6"
+          className="w-2/3 flex items-center justify-center p-6 border-2 border-gray-200"
         >
           <div className="scale-[0.85] transform">
             <Conversation />
