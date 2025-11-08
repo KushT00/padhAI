@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os, tempfile
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -33,9 +33,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # Local development
+        "http://127.0.0.1:3000",  # Alternative localhost
         "https://padh-ai-pro.vercel.app",  # Production
-        "https://*.vercel.app"  # All Vercel preview deployments
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",  # All Vercel preview deployments
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,6 +79,10 @@ class IndexRequest(BaseModel):
 class ChatRequest(BaseModel):
     folder_name: str
     query: str
+
+class MCQRequest(BaseModel):
+    folder_name: str
+    num_questions: int
 
 # Authentication dependency
 def get_current_user(authorization: Optional[str] = Header(None)) -> str:
@@ -186,8 +191,10 @@ def index_folder(request: IndexRequest, user_id: str = Depends(get_current_user)
         )
         chunks = splitter.split_documents(docs)
         
-        # Create embeddings and FAISS index
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        # Create embeddings and FAISS index (HuggingFace - FREE, no API key needed)
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
         vectorstore = FAISS.from_documents(chunks, embeddings)
         
         # Save FAISS index locally
@@ -224,7 +231,9 @@ def chat(request: ChatRequest, user_id: str = Depends(get_current_user)):
     
     try:
         # Load FAISS index
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
         vectorstore = FAISS.load_local(
             index_path, 
             embeddings,
@@ -242,7 +251,7 @@ def chat(request: ChatRequest, user_id: str = Depends(get_current_user)):
         
         # Initialize LLM
         llm = ChatGroq(
-            model="deepseek-r1-distill-llama-70b",
+            model="openai/gpt-oss-20b",
             temperature=0,  # 0 for factual, 0.7 for creative
             max_tokens=None,
             reasoning_format="parsed",
@@ -311,8 +320,86 @@ def get_folders(user_id: str = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(500, f"Error fetching folders: {str(e)}")
 
+# ----------------- Generate MCQs -----------------
+@app.post("/generate_mcqs")
+def generate_mcqs(request: MCQRequest, user_id: str = Depends(get_current_user)):
+    """Generate MCQs from indexed folder content"""
+    import json, re
+    
+    folder_name = request.folder_name
+    num_questions = request.num_questions
+    
+    # Validate
+    if num_questions < 5 or num_questions > 15:
+        raise HTTPException(400, "Number of questions must be between 5 and 15")
+    
+    # Check if indexed
+    index_path = os.path.join(INDEX_DIR, user_id, f"{folder_name}_faiss")
+    if not os.path.exists(index_path):
+        raise HTTPException(404, f"Folder '{folder_name}' not indexed. Please index it first.")
+    
+    try:
+        # Load FAISS index (same as chat)
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        vectorstore = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
+        
+        # Get diverse chunks
+        retriever = vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": num_questions * 3, "fetch_k": num_questions * 5}
+        )
+        docs = retriever.get_relevant_documents(f"Generate diverse questions about {folder_name}")
+        
+        if not docs:
+            raise HTTPException(404, "No content found in indexed folder")
+        
+        # Combine context
+        context = "\n\n".join([doc.page_content for doc in docs])[:8000]
+        
+        # Initialize LLM
+        llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0.7, max_tokens=4000)
+        
+        # Prompt
+        prompt = f"""You are an expert teacher. Generate EXACTLY {num_questions} multiple-choice questions.
+
+CONTENT:
+{context}
+
+FORMAT (JSON only, no extra text):
+[
+  {{"question": "...", "options": ["A", "B", "C", "D"], "correct_answer": 0, "explanation": "..."}}
+]
+
+Generate {num_questions} questions with 4 options each."""
+        
+        # Generate
+        response = llm.invoke(prompt)
+        
+        # Parse JSON
+        json_match = re.search(r'\[.*\]', response.content, re.DOTALL)
+        mcqs = json.loads(json_match.group(0) if json_match else response.content)
+        
+        # Validate
+        if not isinstance(mcqs, list) or len(mcqs) == 0:
+            raise HTTPException(500, "Failed to generate valid MCQs")
+        
+        mcqs = mcqs[:num_questions]
+        
+        for mcq in mcqs:
+            if not all(k in mcq for k in ["question", "options", "correct_answer", "explanation"]):
+                raise HTTPException(500, "Invalid MCQ format")
+            if len(mcq["options"]) != 4:
+                raise HTTPException(500, "Each question must have 4 options")
+        
+        return {"questions": mcqs, "folder": folder_name, "total_questions": len(mcqs)}
+        
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"Failed to parse MCQ response: {str(e)}")
+    except Exception as e:
+        raise HTTPException(500, f"Error generating MCQs: {str(e)}")
+
 # ----------------- Health Check -----------------
-@app.get("/")
+@app.get("/health")
 def health_check():
     return {"status": "ok", "service": "PadhAI RAG API"}
 

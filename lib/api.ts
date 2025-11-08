@@ -96,3 +96,40 @@ export async function getUserFolders(): Promise<{
 
   return response.json();
 }
+
+// Generate MCQs from indexed folder
+export async function generateMCQs(folderName: string, numQuestions: number): Promise<{
+  questions: Array<{
+    question: string;
+    options: string[];
+    correct_answer: number;
+    explanation: string;
+  }>;
+  folder: string;
+  total_questions: number;
+}> {
+  const token = await getAuthToken();
+  
+  if (!token) {
+    throw new Error('Not authenticated');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/generate_mcqs`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ 
+      folder_name: folderName,
+      num_questions: numQuestions
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to generate MCQs');
+  }
+
+  return response.json();
+}

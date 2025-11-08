@@ -3,8 +3,8 @@ uvicorn
 langchain
 langchain-community
 langchain-groq
-langchain-google-genai
-google-generativeai
+langchain-huggingface
+sentence-transformers
 python-dotenv
 supabase
 pyjwt
