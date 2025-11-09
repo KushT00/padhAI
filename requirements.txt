@@ -11,3 +11,4 @@ pyjwt
 pypdf
 faiss-cpu
 langsmith
+reportlab

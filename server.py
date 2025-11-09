@@ -14,6 +14,12 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from typing import Optional
 import jwt
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.enums import TA_CENTER
+from io import BytesIO
 
 load_dotenv()
 
@@ -402,6 +408,112 @@ Generate {num_questions} questions with 4 options each."""
     except Exception as e:
         raise HTTPException(500, f"Error generating MCQs: {str(e)}")
 
+# ----------------- PDF Generation Helper -----------------
+def create_pdf_paper(paper_content: str, folder_name: str, marks: int, timestamp: str) -> bytes:
+    """Convert text paper content to formatted PDF"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.75*inch, bottomMargin=0.75*inch)
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=12,
+        alignment=TA_CENTER,
+        fontName='Helvetica-Bold'
+    )
+    
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=10,
+        spaceBefore=15,
+        fontName='Helvetica-Bold'
+    )
+    
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=11,
+        spaceAfter=8,
+        fontName='Helvetica'
+    )
+    
+    question_style = ParagraphStyle(
+        'Question',
+        parent=styles['Normal'],
+        fontSize=11,
+        spaceAfter=6,
+        spaceBefore=8,
+        fontName='Helvetica-Bold'
+    )
+    
+    # Build content
+    content = []
+    
+    # Title and header
+    content.append(Paragraph("EXAMINATION PAPER", title_style))
+    content.append(Spacer(1, 0.2*inch))
+    content.append(Paragraph(f"<b>Subject:</b> {folder_name}", normal_style))
+    content.append(Paragraph(f"<b>Total Marks:</b> {marks}", normal_style))
+    content.append(Paragraph(f"<b>Duration:</b> {('45 minutes' if marks == 20 else '2 hours')}", normal_style))
+    content.append(Paragraph(f"<b>Date:</b> {timestamp}", normal_style))
+    content.append(Spacer(1, 0.3*inch))
+    content.append(Paragraph("_" * 100, normal_style))
+    content.append(Spacer(1, 0.2*inch))
+    
+    # Process paper content line by line
+    lines = paper_content.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            content.append(Spacer(1, 0.1*inch))
+            continue
+        
+        # Section headers (Section A, Section B, etc.)
+        if line.startswith('##') or (line.startswith('Section') and ('A' in line or 'B' in line or 'C' in line)):
+            clean_line = line.replace('##', '').replace('**', '').strip()
+            content.append(Spacer(1, 0.15*inch))
+            content.append(Paragraph(clean_line, header_style))
+            continue
+        
+        # Questions (Q1, Q2, or 1., 2., etc.)
+        if line.startswith(('Q', '#', '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '10.')):
+            clean_line = line.replace('**', '').replace('##', '').strip()
+            content.append(Paragraph(clean_line, question_style))
+            continue
+        
+        # MCQ Options (A), B), C), D))
+        if line.strip().startswith(('A)', 'B)', 'C)', 'D)', 'A.', 'B.', 'C.', 'D.')):
+            clean_line = '&nbsp;&nbsp;&nbsp;&nbsp;' + line.replace('**', '').strip()
+            content.append(Paragraph(clean_line, normal_style))
+            continue
+        
+        # Mark indicators [X marks]
+        if '[' in line and 'mark' in line.lower():
+            clean_line = '<i>' + line.replace('**', '').strip() + '</i>'
+            content.append(Paragraph(clean_line, normal_style))
+            continue
+        
+        # Answer spaces (underscores)
+        if '_____' in line:
+            content.append(Spacer(1, 0.3*inch))
+            continue
+        
+        # Regular text
+        clean_line = line.replace('**', '').replace('##', '').strip()
+        if clean_line:
+            content.append(Paragraph(clean_line, normal_style))
+    
+    # Build PDF
+    doc.build(content)
+    buffer.seek(0)
+    return buffer.read()
+
 # ----------------- Generate Paper -----------------
 @app.post("/generate_paper")
 def generate_paper(request: PaperRequest, user_id: str = Depends(get_current_user)):
@@ -498,28 +610,20 @@ Q1. Explain... [5 marks]
 
 Generate the complete QUESTION PAPER only. NO ANSWER GUIDE."""
         
-        # Generate paper
+        # Generate paper content
         response = llm.invoke(prompt)
         paper_content = response.content
         
-        # Create paper header
+        # Create timestamps
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        paper_header = f"""
-═══════════════════════════════════════════════════════════════
-                    EXAMINATION PAPER
-                    Subject: {folder_name}
-                    Total Marks: {marks}
-                    Date: {timestamp}
-═══════════════════════════════════════════════════════════════
-
-"""
+        safe_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        full_paper = paper_header + paper_content
+        # Generate PDF
+        pdf_bytes = create_pdf_paper(paper_content, folder_name, marks, timestamp)
         
         # Upload to Supabase Storage
-        # Path: {user_id}/papers/{folder_name}_{marks}marks_{timestamp}.txt
-        safe_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        paper_filename = f"{folder_name}_{marks}marks_{safe_timestamp}.txt"
+        # Path: {user_id}/papers/{folder_name}_{marks}marks_{timestamp}.pdf
+        paper_filename = f"{folder_name}_{marks}marks_{safe_timestamp}.pdf"
         paper_path = f"{user_id}/papers/{paper_filename}"
         
         # Create papers folder if doesn't exist
@@ -532,12 +636,11 @@ Generate the complete QUESTION PAPER only. NO ANSWER GUIDE."""
         except:
             pass  # Folder might already exist
         
-        # Upload paper
-        paper_bytes = full_paper.encode('utf-8')
+        # Upload PDF
         upload_result = supabase.storage.from_("folders").upload(
             paper_path,
-            paper_bytes,
-            {"content-type": "text/plain; charset=utf-8"}
+            pdf_bytes,
+            {"content-type": "application/pdf"}
         )
         
         # Get public URL
@@ -573,12 +676,16 @@ def get_papers(user_id: str = Depends(get_current_user)):
         papers = []
         for file_obj in files_list:
             filename = file_obj.get("name", "")
-            if filename == ".placeholder" or not filename.endswith(".txt"):
+            if filename == ".placeholder":
                 continue
             
-            # Parse filename: {folder_name}_{marks}marks_{timestamp}.txt
+            # Accept both .pdf and .txt files
+            if not (filename.endswith(".pdf") or filename.endswith(".txt")):
+                continue
+            
+            # Parse filename: {folder_name}_{marks}marks_{timestamp}.pdf or .txt
             try:
-                parts = filename.replace(".txt", "").split("_")
+                parts = filename.replace(".pdf", "").replace(".txt", "").split("_")
                 # Find marks part
                 marks_idx = next(i for i, p in enumerate(parts) if p.endswith("marks"))
                 marks = int(parts[marks_idx].replace("marks", ""))
