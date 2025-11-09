@@ -84,6 +84,10 @@ class MCQRequest(BaseModel):
     folder_name: str
     num_questions: int
 
+class PaperRequest(BaseModel):
+    folder_name: str
+    marks: int  # 20 or 60
+
 # Authentication dependency
 def get_current_user(authorization: Optional[str] = Header(None)) -> str:
     """Extract user_id from JWT token"""
@@ -397,6 +401,214 @@ Generate {num_questions} questions with 4 options each."""
         raise HTTPException(500, f"Failed to parse MCQ response: {str(e)}")
     except Exception as e:
         raise HTTPException(500, f"Error generating MCQs: {str(e)}")
+
+# ----------------- Generate Paper -----------------
+@app.post("/generate_paper")
+def generate_paper(request: PaperRequest, user_id: str = Depends(get_current_user)):
+    """Generate exam paper (20 or 60 marks) and store in Supabase"""
+    import datetime
+    
+    folder_name = request.folder_name
+    marks = request.marks
+    
+    # Validate marks
+    if marks not in [20, 60]:
+        raise HTTPException(400, "Marks must be either 20 or 60")
+    
+    # Check if indexed
+    index_path = os.path.join(INDEX_DIR, user_id, f"{folder_name}_faiss")
+    if not os.path.exists(index_path):
+        raise HTTPException(404, f"Folder '{folder_name}' not indexed. Please index it first.")
+    
+    try:
+        # Load FAISS index
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        vectorstore = FAISS.load_local(index_path, embeddings, allow_dangerous_deserialization=True)
+        
+        # Get comprehensive chunks for paper generation
+        chunk_count = 30 if marks == 20 else 50
+        retriever = vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": chunk_count, "fetch_k": chunk_count * 2}
+        )
+        docs = retriever.get_relevant_documents(f"Generate comprehensive exam questions about {folder_name}")
+        
+        if not docs:
+            raise HTTPException(404, "No content found in indexed folder")
+        
+        # Combine context - use more for 60 marks paper
+        context_limit = 10000 if marks == 20 else 15000
+        context = "\n\n".join([doc.page_content for doc in docs])[:context_limit]
+        
+        # Initialize LLM
+        llm = ChatGroq(model="openai/gpt-oss-20b", temperature=0.7, max_tokens=6000)
+        
+        # Create paper structure based on marks
+        if marks == 20:
+            structure = """
+**20 MARKS PAPER STRUCTURE:**
+- Section A: 5 Multiple Choice Questions (1 mark each = 5 marks)
+- Section B: 3 Short Answer Questions (5 marks each = 15 marks)
+
+Total: 20 Marks
+Duration: 45 minutes
+"""
+        else:  # 60 marks
+            structure = """
+**60 MARKS PAPER STRUCTURE:**
+- Section A: 10 Multiple Choice Questions (1 mark each = 10 marks)
+- Section B: 5 Short Answer Questions (4 marks each = 20 marks)
+- Section C: 3 Long Answer Questions (10 marks each = 30 marks)
+
+Total: 60 Marks
+Duration: 2 hours
+"""
+        
+        # Prompt for paper generation
+        prompt = f"""You are an expert exam paper creator. Generate a complete, well-structured QUESTION PAPER ONLY (NO ANSWERS).
+
+SUBJECT CONTENT:
+{context}
+
+{structure}
+
+CRITICAL INSTRUCTIONS:
+1. Generate ONLY the questions - DO NOT include any answers, solutions, or answer keys
+2. For MCQs, provide 4 options (A, B, C, D) but DO NOT indicate which is correct
+3. Create questions that test understanding, application, and analysis
+4. Ensure questions are clear, unambiguous, and answerable from the content
+5. Vary difficulty levels appropriately
+6. Include proper formatting with section headers (Section A, Section B, Section C)
+7. Make questions progressive in difficulty
+8. Add blank lines or answer spaces where students would write their answers
+9. For short/long answer questions, indicate the marks allocated: [X marks]
+
+FORMAT EXAMPLE:
+Section A - Multiple Choice Questions
+Q1. What is...?
+    A) Option 1
+    B) Option 2
+    C) Option 3
+    D) Option 4
+
+Section B - Short Answer Questions
+Q1. Explain... [5 marks]
+    _______________________________________
+    _______________________________________
+
+Generate the complete QUESTION PAPER only. NO ANSWER GUIDE."""
+        
+        # Generate paper
+        response = llm.invoke(prompt)
+        paper_content = response.content
+        
+        # Create paper header
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        paper_header = f"""
+═══════════════════════════════════════════════════════════════
+                    EXAMINATION PAPER
+                    Subject: {folder_name}
+                    Total Marks: {marks}
+                    Date: {timestamp}
+═══════════════════════════════════════════════════════════════
+
+"""
+        
+        full_paper = paper_header + paper_content
+        
+        # Upload to Supabase Storage
+        # Path: {user_id}/papers/{folder_name}_{marks}marks_{timestamp}.txt
+        safe_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        paper_filename = f"{folder_name}_{marks}marks_{safe_timestamp}.txt"
+        paper_path = f"{user_id}/papers/{paper_filename}"
+        
+        # Create papers folder if doesn't exist
+        try:
+            supabase.storage.from_("folders").upload(
+                f"{user_id}/papers/.placeholder",
+                b"",
+                {"content-type": "text/plain"}
+            )
+        except:
+            pass  # Folder might already exist
+        
+        # Upload paper
+        paper_bytes = full_paper.encode('utf-8')
+        upload_result = supabase.storage.from_("folders").upload(
+            paper_path,
+            paper_bytes,
+            {"content-type": "text/plain; charset=utf-8"}
+        )
+        
+        # Get public URL
+        paper_url = supabase.storage.from_("folders").get_public_url(paper_path)
+        
+        return {
+            "status": "generated",
+            "folder": folder_name,
+            "marks": marks,
+            "filename": paper_filename,
+            "path": paper_path,
+            "url": paper_url,
+            "timestamp": timestamp
+        }
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error generating paper: {str(e)}")
+
+# ----------------- Get Generated Papers -----------------
+@app.get("/get_papers")
+def get_papers(user_id: str = Depends(get_current_user)):
+    """Get list of generated papers for the current user"""
+    try:
+        papers_path = f"{user_id}/papers"
+        
+        # List all files in papers folder
+        files_list = supabase.storage.from_("folders").list(papers_path)
+        
+        if not files_list:
+            return {"papers": [], "user_id": user_id}
+        
+        # Filter out placeholder and parse paper details
+        papers = []
+        for file_obj in files_list:
+            filename = file_obj.get("name", "")
+            if filename == ".placeholder" or not filename.endswith(".txt"):
+                continue
+            
+            # Parse filename: {folder_name}_{marks}marks_{timestamp}.txt
+            try:
+                parts = filename.replace(".txt", "").split("_")
+                # Find marks part
+                marks_idx = next(i for i, p in enumerate(parts) if p.endswith("marks"))
+                marks = int(parts[marks_idx].replace("marks", ""))
+                
+                # Folder name is everything before marks
+                folder_name = "_".join(parts[:marks_idx])
+                
+                # Timestamp is after marks
+                timestamp_parts = parts[marks_idx + 1:]
+                
+                papers.append({
+                    "filename": filename,
+                    "folder": folder_name,
+                    "marks": marks,
+                    "path": f"{papers_path}/{filename}",
+                    "created_at": file_obj.get("created_at"),
+                    "updated_at": file_obj.get("updated_at"),
+                    "size": file_obj.get("metadata", {}).get("size", 0)
+                })
+            except:
+                # Skip files that don't match expected format
+                continue
+        
+        # Sort by creation date (newest first)
+        papers.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        return {"papers": papers, "user_id": user_id}
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching papers: {str(e)}")
 
 # ----------------- Health Check -----------------
 @app.get("/health")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,13 +16,143 @@ import {
   Clock,
   AlertCircle,
   CheckCircle,
-  FileText
+  FileText,
+  Download,
+  Loader2,
+  Plus,
+  RefreshCw
 } from 'lucide-react';
+import { getUserFolders, generatePaper, getPapers } from '@/lib/api';
+import { supabase } from '@/lib/client';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+
+interface GeneratedPaper {
+  filename: string;
+  folder: string;
+  marks: number;
+  path: string;
+  created_at: string;
+  updated_at: string;
+  size: number;
+}
 
 export default function PredictionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState('all');
+  
+  // Paper generation states
+  const [folders, setFolders] = useState<string[]>([]);
+  const [selectedFolder, setSelectedFolder] = useState<string>('');
+  const [selectedMarks, setSelectedMarks] = useState<number>(20);
+  const [papers, setPapers] = useState<GeneratedPaper[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingPapers, setLoadingPapers] = useState(true);
+  const [error, setError] = useState<string>('');
+  const [successMessage, setSuccessMessage] = useState<string>('');
+  const [isGenerateDialogOpen, setIsGenerateDialogOpen] = useState(false);
+
+  // Load folders and papers on mount
+  useEffect(() => {
+    loadFolders();
+    loadPapers();
+  }, []);
+
+  const loadFolders = async () => {
+    try {
+      const data = await getUserFolders();
+      setFolders(data.folders);
+      if (data.folders.length > 0) {
+        setSelectedFolder(data.folders[0]);
+      }
+    } catch (err: any) {
+      console.error('Error loading folders:', err);
+      setError('Failed to load folders');
+    }
+  };
+
+  const loadPapers = async () => {
+    try {
+      setLoadingPapers(true);
+      const data = await getPapers();
+      setPapers(data.papers);
+    } catch (err: any) {
+      console.error('Error loading papers:', err);
+    } finally {
+      setLoadingPapers(false);
+    }
+  };
+
+  const handleGeneratePaper = async () => {
+    if (!selectedFolder) {
+      setError('Please select a folder');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+      setSuccessMessage('');
+      
+      const result = await generatePaper(selectedFolder, selectedMarks);
+      
+      setSuccessMessage(`Paper generated successfully! (${result.marks} marks)`);
+      setIsGenerateDialogOpen(false);
+      
+      // Reload papers list
+      await loadPapers();
+      
+      setTimeout(() => setSuccessMessage(''), 5000);
+    } catch (err: any) {
+      console.error('Error generating paper:', err);
+      setError(err.message || 'Failed to generate paper. Make sure the folder is indexed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadPaper = async (paper: GeneratedPaper) => {
+    try {
+      const { data, error: downloadError } = await supabase.storage
+        .from('folders')
+        .download(paper.path);
+
+      if (downloadError) throw downloadError;
+
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = paper.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Error downloading paper:', err);
+      setError('Failed to download paper');
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days} days ago`;
+    return date.toLocaleDateString();
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
 
   const predictions = [
     {
@@ -139,22 +269,146 @@ export default function PredictionsPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Error/Success Messages */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start space-x-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setError('')}
+            className="text-red-600 hover:text-red-800"
+          >
+            ×
+          </Button>
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start space-x-3">
+          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm text-green-700">{successMessage}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSuccessMessage('')}
+            className="text-green-600 hover:text-green-800"
+          >
+            ×
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-3xl font-bold text-gray-900">Question Predictions</h1>
-        <p className="text-gray-600">AI-powered predictions based on past exam patterns and your study materials</p>
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold text-gray-900">Exam Paper Generation</h1>
+          <p className="text-gray-600">Generate AI-powered exam papers from your indexed study materials</p>
+        </div>
+        <Dialog open={isGenerateDialogOpen} onOpenChange={setIsGenerateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-blue-400 hover:bg-blue-500">
+              <Plus className="w-4 h-4 mr-2" />
+              Generate New Paper
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Generate Exam Paper</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="folder-select">Select Folder</Label>
+                <Select 
+                  value={selectedFolder} 
+                  onValueChange={setSelectedFolder}
+                  disabled={loading}
+                >
+                  <SelectTrigger id="folder-select">
+                    <SelectValue placeholder="Choose a folder" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {folders.length === 0 ? (
+                      <SelectItem value="none" disabled>No folders found</SelectItem>
+                    ) : (
+                      folders.map((folder) => (
+                        <SelectItem key={folder} value={folder}>
+                          {folder}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="marks-select">Paper Marks</Label>
+                <Select 
+                  value={selectedMarks.toString()} 
+                  onValueChange={(val) => setSelectedMarks(parseInt(val))}
+                  disabled={loading}
+                >
+                  <SelectTrigger id="marks-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="20">20 Marks (Short Paper)</SelectItem>
+                    <SelectItem value="60">60 Marks (Full Paper)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-gray-500">
+                  {selectedMarks === 20 
+                    ? '5 MCQs + 3 Short Answer Questions (45 min)' 
+                    : '10 MCQs + 5 Short + 3 Long Answer Questions (2 hours)'}
+                </p>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsGenerateDialogOpen(false)}
+                  disabled={loading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-blue-400 hover:bg-blue-500"
+                  onClick={handleGeneratePaper}
+                  disabled={loading || !selectedFolder}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Target className="w-4 h-4 mr-2" />
+                      Generate Paper
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="bg-white shadow-sm border border-gray-200">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Total Predictions</p>
-                <p className="text-2xl font-bold text-gray-900">{predictions.length}</p>
+                <p className="text-sm font-medium text-gray-600">Generated Papers</p>
+                <p className="text-2xl font-bold text-gray-900">{papers.length}</p>
               </div>
-              <Target className="w-8 h-8 text-blue-400" />
+              <FileText className="w-8 h-8 text-blue-400" />
             </div>
           </CardContent>
         </Card>
@@ -163,12 +417,12 @@ export default function PredictionsPage() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">High Probability</p>
-                <p className="text-2xl font-bold text-red-600">
-                  {predictions.filter(p => p.probability >= 85).length}
+                <p className="text-sm font-medium text-gray-600">20 Marks Papers</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {papers.filter(p => p.marks === 20).length}
                 </p>
               </div>
-              <AlertCircle className="w-8 h-8 text-red-400" />
+              <Target className="w-8 h-8 text-green-400" />
             </div>
           </CardContent>
         </Card>
@@ -177,155 +431,96 @@ export default function PredictionsPage() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-600">Subjects Covered</p>
-                <p className="text-2xl font-bold text-gray-900">6</p>
+                <p className="text-sm font-medium text-gray-600">60 Marks Papers</p>
+                <p className="text-2xl font-bold text-purple-600">
+                  {papers.filter(p => p.marks === 60).length}
+                </p>
               </div>
-              <BookOpen className="w-8 h-8 text-green-400" />
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card className="bg-white shadow-sm border border-gray-200">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Avg. Probability</p>
-                <p className="text-2xl font-bold text-purple-600">83%</p>
-              </div>
-              <TrendingUp className="w-8 h-8 text-purple-400" />
+              <BookOpen className="w-8 h-8 text-purple-400" />
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Filters */}
-      <Card className="bg-white shadow-sm border border-gray-200">
-        <CardContent className="p-6">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Search predictions..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={selectedSubject} onValueChange={setSelectedSubject}>
-              <SelectTrigger className="w-full lg:w-48">
-                <SelectValue placeholder="All Subjects" />
-              </SelectTrigger>
-              <SelectContent>
-                {subjects.map(subject => (
-                  <SelectItem key={subject} value={subject}>
-                    {subject === 'all' ? 'All Subjects' : subject}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedDifficulty} onValueChange={setSelectedDifficulty}>
-              <SelectTrigger className="w-full lg:w-48">
-                <SelectValue placeholder="All Difficulties" />
-              </SelectTrigger>
-              <SelectContent>
-                {difficulties.map(difficulty => (
-                  <SelectItem key={difficulty} value={difficulty}>
-                    {difficulty === 'all' ? 'All Difficulties' : difficulty}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Predictions List */}
-      <div className="space-y-4">
-        {filteredPredictions.map((prediction) => (
-          <Card key={prediction.id} className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                {/* Header */}
+      {/* Generated Papers List */}
+      {loadingPapers ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+        </div>
+      ) : papers.length === 0 ? (
+        <Card className="bg-white shadow-sm border border-gray-200">
+          <CardContent className="p-12 text-center">
+            <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No papers generated yet</h3>
+            <p className="text-gray-600 mb-6">
+              Generate your first exam paper from your indexed study materials
+            </p>
+            <Button 
+              className="bg-blue-400 hover:bg-blue-500"
+              onClick={() => setIsGenerateDialogOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Generate Your First Paper
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {papers.map((paper) => (
+            <Card key={paper.filename} className="bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+              <CardHeader>
                 <div className="flex items-start justify-between">
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center space-x-3">
-                      <Badge className={getProbabilityColor(prediction.probability)}>
-                        {prediction.probability}% likely
+                  <div className="space-y-2 flex-1">
+                    <CardTitle className="text-lg">{paper.folder}</CardTitle>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className={paper.marks === 20 ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700'}>
+                        {paper.marks} Marks
                       </Badge>
-                      <Badge className={getSubjectColor(prediction.subject)}>
-                        {prediction.subject}
-                      </Badge>
-                      <Badge className={getDifficultyColor(prediction.difficulty)}>
-                        {prediction.difficulty}
-                      </Badge>
-                      <Badge variant="outline">
-                        {prediction.marks} marks
+                      <Badge variant="outline" className="text-xs">
+                        {formatDate(paper.created_at)}
                       </Badge>
                     </div>
-                    <p className="text-sm text-gray-600">{prediction.topic} • {prediction.type}</p>
                   </div>
-                  <div className="text-right text-sm text-gray-500">
-                    <div className="flex items-center space-x-1">
-                      <Clock className="w-4 h-4" />
-                      <span>Last seen: {prediction.lastSeen}</span>
-                    </div>
+                  <FileText className="w-6 h-6 text-gray-400" />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="flex items-center space-x-2 text-gray-600">
+                    <Clock className="w-4 h-4" />
+                    <span>{paper.marks === 20 ? '45 minutes' : '2 hours'}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-gray-600">
+                    <Target className="w-4 h-4" />
+                    <span>{paper.marks === 20 ? '8 questions' : '18 questions'}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-gray-600">
+                    <FileText className="w-4 h-4" />
+                    <span>{formatFileSize(paper.size)}</span>
+                  </div>
+                  <div className="flex items-center space-x-2 text-gray-600">
+                    <BookOpen className="w-4 h-4" />
+                    <span>{paper.marks === 20 ? 'Short Paper' : 'Full Paper'}</span>
                   </div>
                 </div>
-
-                {/* Question */}
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <p className="font-medium text-gray-900">{prediction.question}</p>
-                </div>
-
-                {/* Sources */}
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-gray-700 flex items-center">
-                    <FileText className="w-4 h-4 mr-2" />
-                    Found in past papers:
+                
+                <div className="pt-4 border-t border-gray-100">
+                  <p className="text-sm text-gray-600 mb-3">
+                    <strong>Structure:</strong> {paper.marks === 20 
+                      ? 'MCQs (5) + Short Answer (3)' 
+                      : 'MCQs (10) + Short Answer (5) + Long Answer (3)'}
                   </p>
-                  <div className="flex flex-wrap gap-2">
-                    {prediction.sources.map((source, index) => (
-                      <Badge key={index} variant="outline" className="text-xs">
-                        {source}
-                      </Badge>
-                    ))}
-                  </div>
+                  <Button 
+                    className="w-full bg-blue-400 hover:bg-blue-500"
+                    onClick={() => downloadPaper(paper)}
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Download Paper
+                  </Button>
                 </div>
-
-                {/* Actions */}
-                <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                  <div className="flex items-center space-x-4 text-sm text-gray-500">
-                    <span className="flex items-center">
-                      <Target className="w-4 h-4 mr-1" />
-                      Priority: {prediction.probability >= 85 ? 'High' : prediction.probability >= 70 ? 'Medium' : 'Low'}
-                    </span>
-                  </div>
-                  <div className="flex space-x-2">
-                    <Button variant="outline" size="sm">
-                      Practice Similar
-                    </Button>
-                    <Button size="sm" className="bg-blue-400 hover:bg-blue-500">
-                      Study This Topic
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Empty State */}
-      {filteredPredictions.length === 0 && (
-        <div className="text-center py-12">
-          <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No predictions found</h3>
-          <p className="text-gray-600">
-            {searchQuery || selectedSubject !== 'all' || selectedDifficulty !== 'all'
-              ? 'Try adjusting your filters to see more predictions'
-              : 'Upload more study materials to generate predictions'
-            }
-          </p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
     </div>

@@ -133,3 +133,73 @@ export async function generateMCQs(folderName: string, numQuestions: number): Pr
 
   return response.json();
 }
+
+// Generate paper (20 or 60 marks) from indexed folder
+export async function generatePaper(folderName: string, marks: number): Promise<{
+  status: string;
+  folder: string;
+  marks: number;
+  filename: string;
+  path: string;
+  url: string;
+  timestamp: string;
+}> {
+  const token = await getAuthToken();
+  
+  if (!token) {
+    throw new Error('Not authenticated');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/generate_paper`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({ 
+      folder_name: folderName,
+      marks: marks
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to generate paper');
+  }
+
+  return response.json();
+}
+
+// Get list of generated papers
+export async function getPapers(): Promise<{
+  papers: Array<{
+    filename: string;
+    folder: string;
+    marks: number;
+    path: string;
+    created_at: string;
+    updated_at: string;
+    size: number;
+  }>;
+  user_id: string;
+}> {
+  const token = await getAuthToken();
+  
+  if (!token) {
+    throw new Error('Not authenticated');
+  }
+
+  const response = await fetch(`${API_BASE_URL}/get_papers`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || 'Failed to fetch papers');
+  }
+
+  return response.json();
+}
