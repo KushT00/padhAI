@@ -11,6 +11,15 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
   Timer,
   Plus,
   Trash2,
@@ -21,6 +30,8 @@ import {
   Target,
   BookOpen,
   Bell,
+  Calendar,
+  Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -30,6 +41,15 @@ type Todo = {
   notes?: string;
   done: boolean;
   estimateMin?: number;
+};
+
+type TimelineEvent = {
+  id: string;
+  title: string;
+  date: string; // ISO date string
+  time?: string; // HH:MM format
+  notes: string;
+  type: 'exam' | 'viva' | 'assignment' | 'other';
 };
 
 export default function StudySessionPage() {
@@ -44,7 +64,37 @@ export default function StudySessionPage() {
   const [todoNotes, setTodoNotes] = useState('');
   const [dailyGoal, setDailyGoal] = useState<number>(3);
 
+  // Timeline state
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventDate, setEventDate] = useState('');
+  const [eventTime, setEventTime] = useState('');
+  const [eventNotes, setEventNotes] = useState('');
+  const [eventType, setEventType] = useState<TimelineEvent['type']>('exam');
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
   const timerRef = useRef<number | null>(null);
+
+  // Load timeline events from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('padhAI_timeline_events');
+      if (saved) {
+        setTimelineEvents(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error('Failed to load timeline events:', error);
+    }
+  }, []);
+
+  // Save timeline events to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('padhAI_timeline_events', JSON.stringify(timelineEvents));
+    } catch (error) {
+      console.error('Failed to save timeline events:', error);
+    }
+  }, [timelineEvents]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -112,6 +162,41 @@ export default function StudySessionPage() {
   };
 
   const deleteTodo = (id: string) => setTodos((t) => t.filter((x) => x.id !== id));
+
+  // Timeline functions
+  const addTimelineEvent = () => {
+    if (!eventTitle.trim() || !eventDate) return;
+    const newEvent: TimelineEvent = {
+      id: `${Date.now()}`,
+      title: eventTitle.trim(),
+      date: eventDate,
+      time: eventTime || undefined,
+      notes: eventNotes.trim(),
+      type: eventType,
+    };
+    setTimelineEvents((events) => [...events, newEvent]);
+    // Clear form
+    setEventTitle('');
+    setEventDate('');
+    setEventTime('');
+    setEventNotes('');
+    setEventType('exam');
+    // Close dialog
+    setIsDialogOpen(false);
+  };
+
+  const deleteTimelineEvent = (id: string) => {
+    setTimelineEvents((events) => events.filter((e) => e.id !== id));
+  };
+
+  // Sort events by date (earliest first)
+  const sortedEvents = useMemo(() => {
+    return [...timelineEvents].sort((a, b) => {
+      const dateA = new Date(a.date + (a.time ? `T${a.time}` : '')).getTime();
+      const dateB = new Date(b.date + (b.time ? `T${b.time}` : '')).getTime();
+      return dateA - dateB;
+    });
+  }, [timelineEvents]);
 
   const completedCount = todos.filter((t) => t.done).length;
   const goalProgress = Math.min(100, Math.round((completedCount / Math.max(1, dailyGoal)) * 100));
@@ -313,6 +398,206 @@ export default function StudySessionPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Timeline Component - Separate Card */}
+      <Card className="bg-white shadow-sm border border-gray-200">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-xl text-gray-900 flex items-center gap-2">
+                <Calendar className="w-5 h-5" />
+                Important Dates Timeline
+              </CardTitle>
+              <CardDescription>Track your exams, vivas, assignments, and other important academic dates</CardDescription>
+            </div>
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-blue-400 hover:bg-blue-500">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[600px]">
+                <DialogHeader>
+                  <DialogTitle>Add Important Date</DialogTitle>
+                  <DialogDescription>
+                    Add an exam, viva, assignment, or other important academic date to your timeline.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">Event Title *</label>
+                      <Input
+                        placeholder="e.g., ML Practical Viva"
+                        value={eventTitle}
+                        onChange={(e) => setEventTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">Event Type</label>
+                      <select
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-md bg-white"
+                        value={eventType}
+                        onChange={(e) => setEventType(e.target.value as TimelineEvent['type'])}
+                      >
+                        <option value="exam">Exam</option>
+                        <option value="viva">Viva</option>
+                        <option value="assignment">Assignment</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">Date *</label>
+                      <Input
+                        type="date"
+                        value={eventDate}
+                        onChange={(e) => setEventDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">Time (optional)</label>
+                      <Input
+                        type="time"
+                        value={eventTime}
+                        onChange={(e) => setEventTime(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Notes</label>
+                    <Textarea
+                      placeholder="Add any additional details..."
+                      value={eventNotes}
+                      onChange={(e) => setEventNotes(e.target.value)}
+                      className="min-h-[100px]"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDialogOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    onClick={addTimelineEvent}
+                    className="bg-blue-400 hover:bg-blue-500"
+                    disabled={!eventTitle.trim() || !eventDate}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Event
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+
+          {/* Events Timeline */}
+          <div className="space-y-3">
+            {sortedEvents.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <Calendar className="w-16 h-16 mx-auto mb-3 opacity-20" />
+                <p className="text-sm">No events yet. Add your first important date!</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {sortedEvents.map((event, idx) => {
+                  const eventDate = new Date(event.date + (event.time ? `T${event.time}` : ''));
+                  const isUpcoming = eventDate.getTime() > Date.now();
+                  const isPast = !isUpcoming;
+                  
+                  const typeColors = {
+                    exam: 'border-red-200 bg-red-50',
+                    viva: 'border-purple-200 bg-purple-50',
+                    assignment: 'border-blue-200 bg-blue-50',
+                    other: 'border-gray-200 bg-gray-50',
+                  };
+                  
+                  const typeBadgeColors = {
+                    exam: 'bg-red-100 text-red-700 border-red-200',
+                    viva: 'bg-purple-100 text-purple-700 border-purple-200',
+                    assignment: 'bg-blue-100 text-blue-700 border-blue-200',
+                    other: 'bg-gray-100 text-gray-700 border-gray-200',
+                  };
+
+                  return (
+                    <div
+                      key={event.id}
+                      className={cn(
+                        'relative rounded-lg border p-4 transition-all hover:shadow-md',
+                        typeColors[event.type],
+                        isPast && 'opacity-60'
+                      )}
+                    >
+                      {/* Timeline connector */}
+                      {idx < sortedEvents.length - 1 && (
+                        <div className="absolute left-6 top-full w-0.5 h-3 bg-gray-300" />
+                      )}
+                      
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge className={cn('text-xs', typeBadgeColors[event.type])}>
+                              {event.type.charAt(0).toUpperCase() + event.type.slice(1)}
+                            </Badge>
+                            {isPast && (
+                              <Badge className="text-xs bg-gray-200 text-gray-600 border-gray-300">
+                                Past
+                              </Badge>
+                            )}
+                            {isUpcoming && (
+                              <Badge className="text-xs bg-green-100 text-green-700 border-green-200">
+                                Upcoming
+                              </Badge>
+                            )}
+                          </div>
+                          <h4 className="font-semibold text-gray-900 text-lg">{event.title}</h4>
+                          <div className="flex items-center gap-4 text-sm text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-4 h-4" />
+                              {new Date(event.date).toLocaleDateString('en-US', {
+                                weekday: 'short',
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              })}
+                            </div>
+                            {event.time && (
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" />
+                                {event.time}
+                              </div>
+                            )}
+                          </div>
+                          {event.notes && (
+                            <p className="text-sm text-gray-700 mt-2 bg-white/50 rounded p-2">{event.notes}</p>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => deleteTimelineEvent(event.id)}
+                          className="flex-shrink-0 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4 text-gray-500 hover:text-red-500" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
